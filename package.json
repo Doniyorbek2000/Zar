@@ -1,0 +1,21 @@
+{
+  "name": "zarpos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ZarPOS — restoran va kafe avtomatlashtirish tizimi",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:backend": "npm run dev --workspace backend",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "prisma:generate": "npm run prisma:generate --workspace backend",
+    "seed": "npm run seed --workspace backend"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
