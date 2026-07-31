@@ -61,6 +61,11 @@ export function useRealtime(): { connected: boolean } {
       qc.invalidateQueries({ queryKey: ['dashboard'] });
     });
 
+    // Dostavka buyurtmalari o'zgardi
+    socket.on('delivery:changed', () => {
+      qc.invalidateQueries({ queryKey: ['delivery'] });
+    });
+
     return () => {
       socket.disconnect();
     };

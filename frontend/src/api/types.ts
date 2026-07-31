@@ -29,6 +29,7 @@ export interface Product {
   type: 'DISH' | 'GOODS' | 'PREPARATION';
   price: string;
   unit: string;
+  imageUrl?: string | null;
   isActive: boolean;
   inStopList: boolean;
   category?: { id: string; name: string; color: string };
@@ -56,6 +57,7 @@ export interface Order {
   id: string;
   number: number;
   type: 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY';
+  source: 'POS' | 'PHONE' | 'QR' | 'WEB';
   status: 'OPEN' | 'SENT' | 'READY' | 'PAID' | 'CANCELLED';
   tableId?: string;
   guests: number;
@@ -64,11 +66,19 @@ export interface Order {
   discountAmt: string;
   serviceFeePct: string;
   serviceFeeAmt: string;
+  deliveryFee: string;
   total: string;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  deliveryAddress?: string | null;
+  deliveryStatus?: string | null;
+  bonusEarned: string;
+  bonusRedeemed: string;
   openedAt: string;
   items: OrderItem[];
   table?: { id: string; name: string };
   waiter?: { id: string; fullName: string };
+  customer?: { id: string; fullName: string; phone?: string | null; discountPct: string; bonusBalance: string } | null;
 }
 
 export interface Table {
@@ -130,6 +140,65 @@ export interface Shift {
   openingCash: string;
   openedAt: string;
   user?: { id: string; fullName: string };
+}
+
+export interface Customer {
+  id: string;
+  fullName: string;
+  phone?: string | null;
+  cardNumber?: string | null;
+  address?: string | null;
+  bonusBalance: string;
+  discountPct: string;
+  note?: string | null;
+  createdAt: string;
+}
+
+export interface BonusTransaction {
+  id: string;
+  type: 'EARN' | 'REDEEM' | 'ADJUST';
+  amount: string;
+  balanceAfter: string;
+  note?: string | null;
+  createdAt: string;
+}
+
+export interface CustomerDetail extends Customer {
+  bonusTransactions: BonusTransaction[];
+  ordersCount: number;
+  totalSpent: string;
+}
+
+export interface Courier {
+  id: string;
+  fullName: string;
+  phone?: string | null;
+}
+
+export interface DeliveryOrder {
+  id: string;
+  number: number;
+  status: string;
+  deliveryStatus: 'PENDING' | 'ASSIGNED' | 'ON_WAY' | 'DELIVERED' | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  deliveryAddress?: string | null;
+  deliveryFee: string;
+  total: string;
+  openedAt: string;
+  source: string;
+  items: { id: string; name: string; quantity: string; status: string }[];
+  courier?: Courier | null;
+  customer?: { id: string; fullName: string; phone?: string | null } | null;
+}
+
+export type AppSettings = Record<string, string>;
+
+export interface RecipeItemRow {
+  id: string;
+  ingredientId: string;
+  quantity: string;
+  ingredient: Ingredient;
 }
 
 export interface ReceiptDto {

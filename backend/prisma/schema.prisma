@@ -55,6 +55,7 @@ enum Role {
   CASHIER // Kassir
   WAITER // Ofitsiant
   COOK // Oshpaz (KDS)
+  COURIER // Kuryer (yetkazib beruvchi)
 }
 
 model User {
@@ -73,6 +74,7 @@ model User {
   branch        Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
   ordersOpened  Order[]        @relation("OrderOpenedBy")
   ordersServed  Order[]        @relation("OrderWaiter")
+  ordersDelivered Order[]      @relation("OrderCourier")
   payments      Payment[]
   shifts        Shift[]
   stockMovements StockMovement[]
@@ -340,10 +342,42 @@ model Customer {
   cardNumber   String?  @unique
   bonusBalance Decimal  @db.Decimal(14, 2) @default(0)
   discountPct  Decimal  @db.Decimal(5, 2) @default(0)
+  address      String? // yetkazib berish uchun standart manzil
+  note         String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  orders Order[]
+  orders            Order[]
+  bonusTransactions BonusTransaction[]
+}
+
+// Bonus (cashback) harakatlari jurnali
+enum BonusType {
+  EARN // to'lovda to'plangan
+  REDEEM // to'lovda ishlatilgan
+  ADJUST // qo'lda tuzatish
+}
+
+model BonusTransaction {
+  id           String    @id @default(cuid())
+  customerId   String
+  orderId      String?
+  type         BonusType
+  amount       Decimal   @db.Decimal(14, 2) // + to'plash / - ishlatish
+  balanceAfter Decimal   @db.Decimal(14, 2)
+  note         String?
+  createdAt    DateTime  @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+// Umumiy sozlamalar (key-value): loyalty.earnPct, delivery.defaultFee, ...
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 // ============================================================
@@ -364,11 +398,28 @@ enum OrderStatus {
   CANCELLED // Bekor qilingan
 }
 
+// Buyurtma manbai
+enum OrderSource {
+  POS // Kassa/terminal
+  PHONE // Telefon orqali (operator)
+  QR // Stol QR menyu (mijoz o'zi)
+  WEB // Onlayn
+}
+
+// Yetkazib berish holati
+enum DeliveryStatus {
+  PENDING // Kuryer kutilmoqda
+  ASSIGNED // Kuryer tayinlandi
+  ON_WAY // Yo'lda
+  DELIVERED // Yetkazildi
+}
+
 model Order {
   id          String      @id @default(cuid())
   branchId    String
   number      Int // filial ichida ketma-ket raqam
   type        OrderType   @default(DINE_IN)
+  source      OrderSource @default(POS)
   status      OrderStatus @default(OPEN)
   tableId     String?
   waiterId    String?
@@ -381,8 +432,20 @@ model Order {
   discountAmt Decimal     @db.Decimal(14, 2) @default(0)
   serviceFeePct Decimal   @db.Decimal(5, 2) @default(0) // xizmat haqi %
   serviceFeeAmt Decimal   @db.Decimal(14, 2) @default(0)
+  deliveryFee Decimal     @db.Decimal(14, 2) @default(0)
   total       Decimal     @db.Decimal(14, 2) @default(0) // yakuniy summa
   note        String?
+
+  // Dostavka / telefon buyurtma ma'lumotlari
+  customerName    String?
+  customerPhone   String?
+  deliveryAddress String?
+  deliveryStatus  DeliveryStatus?
+  courierId       String?
+
+  // Loyalty
+  bonusEarned   Decimal @db.Decimal(14, 2) @default(0)
+  bonusRedeemed Decimal @db.Decimal(14, 2) @default(0)
 
   openedAt   DateTime  @default(now())
   closedAt   DateTime?
@@ -392,6 +455,7 @@ model Order {
   table     Table?      @relation(fields: [tableId], references: [id], onDelete: SetNull)
   waiter    User?       @relation("OrderWaiter", fields: [waiterId], references: [id], onDelete: SetNull)
   openedBy  User?       @relation("OrderOpenedBy", fields: [openedById], references: [id], onDelete: SetNull)
+  courier   User?       @relation("OrderCourier", fields: [courierId], references: [id], onDelete: SetNull)
   customer  Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
   items     OrderItem[]
   payments  Payment[]
@@ -400,6 +464,7 @@ model Order {
   @@unique([branchId, number])
   @@index([branchId, status])
   @@index([tableId])
+  @@index([type, deliveryStatus])
 }
 
 enum OrderItemStatus {

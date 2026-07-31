@@ -1,15 +1,17 @@
-import { OrderType, PaymentMethod, Prisma } from '@prisma/client';
+import { DeliveryStatus, OrderSource, OrderType, PaymentMethod, Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { BadRequest, Conflict, NotFound } from '../../lib/errors';
 import { D } from '../../lib/money';
 import { computeTotals } from './orders.totals';
 import { realtime } from '../../realtime/realtime';
+import { settingsService } from '../settings/settings.service';
 
 const ORDER_INCLUDE = {
   items: { include: { modifiers: true, product: { select: { id: true, name: true, type: true } } } },
   table: { select: { id: true, name: true, hallId: true } },
   waiter: { select: { id: true, fullName: true } },
-  customer: { select: { id: true, fullName: true, discountPct: true } },
+  courier: { select: { id: true, fullName: true, phone: true } },
+  customer: { select: { id: true, fullName: true, phone: true, discountPct: true, bonusBalance: true } },
   payments: true,
 } satisfies Prisma.OrderInclude;
 
@@ -49,12 +51,34 @@ export const ordersService = {
     return order;
   },
 
-  // Yangi buyurtma ochish
+  // Yangi buyurtma ochish (POS, telefon, QR)
   async create(
     branchId: string,
-    userId: string,
-    data: { type?: OrderType; tableId?: string; waiterId?: string; guests?: number; customerId?: string },
+    userId: string | null,
+    data: {
+      type?: OrderType;
+      source?: OrderSource;
+      tableId?: string;
+      waiterId?: string;
+      guests?: number;
+      customerId?: string;
+      customerName?: string;
+      customerPhone?: string;
+      deliveryAddress?: string;
+      deliveryFee?: number;
+      note?: string;
+    },
   ) {
+    const isDelivery = data.type === 'DELIVERY';
+    const defaultFee = isDelivery ? await settingsService.getNumber('delivery.defaultFee') : 0;
+
+    // Mijoz biriktirilsa — chegirmasini avtomatik qo'llaymiz
+    let discountPct = 0;
+    if (data.customerId) {
+      const c = await prisma.customer.findUnique({ where: { id: data.customerId } });
+      discountPct = c ? Number(c.discountPct) : 0;
+    }
+
     const order = await prisma.$transaction(async (tx) => {
       if (data.tableId) {
         const busy = await tx.order.findFirst({
@@ -75,11 +99,19 @@ export const ordersService = {
           branchId,
           number,
           type: data.type ?? 'DINE_IN',
+          source: data.source ?? 'POS',
           tableId: data.tableId,
-          waiterId: data.waiterId ?? userId,
-          openedById: userId,
+          waiterId: data.waiterId ?? userId ?? undefined,
+          openedById: userId ?? undefined,
           guests: data.guests ?? 1,
           customerId: data.customerId,
+          customerName: data.customerName,
+          customerPhone: data.customerPhone,
+          deliveryAddress: data.deliveryAddress,
+          deliveryFee: D(data.deliveryFee ?? defaultFee),
+          deliveryStatus: isDelivery ? 'PENDING' : null,
+          discountPct: D(discountPct),
+          note: data.note,
         },
         include: ORDER_INCLUDE,
       });
@@ -87,12 +119,68 @@ export const ordersService = {
       if (data.tableId) {
         await tx.table.update({ where: { id: data.tableId }, data: { status: 'OCCUPIED' } });
       }
-      return created;
+      // Yetkazish narxi total'da darhol aks etishi uchun qayta hisoblaymiz
+      return recalc(tx, created.id);
     });
 
     realtime.emitToBranch(branchId, 'tables:changed');
     realtime.emitToBranch(branchId, 'order:changed', { orderId: order.id });
+    if (isDelivery) realtime.emitToBranch(branchId, 'delivery:changed');
     return order;
+  },
+
+  // Mijozni biriktirish + chegirmani qo'llash
+  async setCustomer(orderId: string, customerId: string | null) {
+    const customer = customerId ? await prisma.customer.findUnique({ where: { id: customerId } }) : null;
+    if (customerId && !customer) throw NotFound('Mijoz topilmadi');
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        customerId,
+        discountPct: customer ? customer.discountPct : new Prisma.Decimal(0),
+        ...(customer?.phone ? { customerPhone: customer.phone } : {}),
+        ...(customer ? { customerName: customer.fullName } : {}),
+      },
+    });
+    const result = await prisma.$transaction((tx) => recalc(tx, orderId));
+    realtime.emitToBranch(result.branchId, 'order:changed', { orderId });
+    return result;
+  },
+
+  // Dostavka ma'lumotlarini yangilash
+  async setDelivery(
+    orderId: string,
+    data: { customerName?: string; customerPhone?: string; deliveryAddress?: string; deliveryFee?: number },
+  ) {
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        ...(data.customerName != null ? { customerName: data.customerName } : {}),
+        ...(data.customerPhone != null ? { customerPhone: data.customerPhone } : {}),
+        ...(data.deliveryAddress != null ? { deliveryAddress: data.deliveryAddress } : {}),
+        ...(data.deliveryFee != null ? { deliveryFee: D(data.deliveryFee) } : {}),
+      },
+    });
+    const result = await prisma.$transaction((tx) => recalc(tx, orderId));
+    realtime.emitToBranch(result.branchId, 'order:changed', { orderId });
+    realtime.emitToBranch(result.branchId, 'delivery:changed');
+    return result;
+  },
+
+  // Kuryer tayinlash / yetkazish holatini o'zgartirish
+  async updateDelivery(orderId: string, data: { courierId?: string | null; deliveryStatus?: DeliveryStatus }) {
+    const updated = await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        ...(data.courierId !== undefined ? { courierId: data.courierId } : {}),
+        ...(data.deliveryStatus ? { deliveryStatus: data.deliveryStatus } : {}),
+        ...(data.courierId && !data.deliveryStatus ? { deliveryStatus: 'ASSIGNED' } : {}),
+      },
+      include: ORDER_INCLUDE,
+    });
+    realtime.emitToBranch(updated.branchId, 'delivery:changed');
+    realtime.emitToBranch(updated.branchId, 'order:changed', { orderId });
+    return updated;
   },
 
   // Buyurtmaga taom qo'shish (narx va tannarx "surat" sifatida saqlanadi)
@@ -220,6 +308,10 @@ export const ordersService = {
     userId: string,
     payments: { method: PaymentMethod; amount: number }[],
   ) {
+    // Loyalty sozlamalari
+    const earnPct = await settingsService.getNumber('loyalty.earnPct');
+    const redeemEnabled = await settingsService.getBool('loyalty.redeemEnabled');
+
     const result = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUniqueOrThrow({
         where: { id: orderId },
@@ -237,6 +329,17 @@ export const ordersService = {
         throw BadRequest(
           `To'lov yetarli emas: kerak ${totals.total.toFixed(2)}, to'landi ${totalPaid.toFixed(2)}`,
         );
+      }
+
+      // Bonus bilan to'lov (REDEEM) tekshiruvi
+      const bonusRedeemed = payments
+        .filter((p) => p.method === 'BONUS')
+        .reduce((s, p) => s.add(D(p.amount)), new Prisma.Decimal(0));
+      if (bonusRedeemed.greaterThan(0)) {
+        if (!redeemEnabled) throw BadRequest('Bonus bilan to\'lov o\'chirilgan');
+        if (!order.customerId) throw BadRequest('Bonus ishlatish uchun mijoz biriktirilishi kerak');
+        const c = await tx.customer.findUniqueOrThrow({ where: { id: order.customerId } });
+        if (c.bonusBalance.lessThan(bonusRedeemed)) throw BadRequest('Bonus balansi yetarli emas');
       }
 
       // Ochiq smenani topish (naqd to'lovlarni bog'lash uchun)
@@ -280,9 +383,54 @@ export const ordersService = {
         }
       }
 
+      // Loyalty: bonus ishlatish (REDEEM) va to'plash (EARN)
+      let earned = new Prisma.Decimal(0);
+      if (order.customerId) {
+        const customer = await tx.customer.findUniqueOrThrow({ where: { id: order.customerId } });
+        let balance = customer.bonusBalance;
+
+        if (bonusRedeemed.greaterThan(0)) {
+          balance = balance.sub(bonusRedeemed);
+          await tx.bonusTransaction.create({
+            data: {
+              customerId: order.customerId,
+              orderId,
+              type: 'REDEEM',
+              amount: bonusRedeemed.negated(),
+              balanceAfter: balance,
+              note: `Buyurtma #${order.number}`,
+            },
+          });
+        }
+
+        // Cashback faqat bonusdan tashqari to'langan qismga
+        const earnBase = totals.total.sub(bonusRedeemed);
+        earned = earnBase.mul(earnPct).div(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+        if (earned.greaterThan(0)) {
+          balance = balance.add(earned);
+          await tx.bonusTransaction.create({
+            data: {
+              customerId: order.customerId,
+              orderId,
+              type: 'EARN',
+              amount: earned,
+              balanceAfter: balance,
+              note: `Buyurtma #${order.number} · cashback ${earnPct}%`,
+            },
+          });
+        }
+        await tx.customer.update({ where: { id: order.customerId }, data: { bonusBalance: balance } });
+      }
+
       const updated = await tx.order.update({
         where: { id: orderId },
-        data: { status: 'PAID', closedAt: new Date() },
+        data: {
+          status: 'PAID',
+          closedAt: new Date(),
+          bonusEarned: earned,
+          bonusRedeemed,
+          ...(order.type === 'DELIVERY' ? { deliveryStatus: 'DELIVERED' } : {}),
+        },
         include: ORDER_INCLUDE,
       });
 
@@ -291,7 +439,7 @@ export const ordersService = {
       }
 
       const change = totalPaid.sub(totals.total);
-      return { order: updated, change: change.toFixed(2) };
+      return { order: updated, change: change.toFixed(2), bonusEarned: earned.toFixed(2) };
     });
 
     const branchId = result.order.branchId;
@@ -299,6 +447,7 @@ export const ordersService = {
     realtime.emitToBranch(branchId, 'order:changed', { orderId });
     realtime.emitToBranch(branchId, 'kds:changed');
     realtime.emitToBranch(branchId, 'stock:changed');
+    realtime.emitToBranch(branchId, 'delivery:changed');
     return result;
   },
 

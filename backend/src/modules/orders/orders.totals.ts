@@ -13,6 +13,7 @@ export interface OrderItemLike {
 export interface OrderLike {
   discountPct: Prisma.Decimal;
   serviceFeePct: Prisma.Decimal;
+  deliveryFee?: Prisma.Decimal;
   items: OrderItemLike[];
 }
 
@@ -24,6 +25,7 @@ export interface Totals {
 }
 
 // Buyurtma summalarini qayta hisoblaydi (bekor qilinganlarni hisobga olmaydi)
+// Jami = oraliq − chegirma + xizmat haqi + yetkazish narxi
 export function computeTotals(order: OrderLike): Totals {
   const subtotal = order.items.reduce((sum, item) => {
     if (item.status === 'CANCELLED') return sum;
@@ -35,7 +37,8 @@ export function computeTotals(order: OrderLike): Totals {
   const discountAmt = round2(subtotal.mul(order.discountPct).div(100));
   const afterDiscount = subtotal.sub(discountAmt);
   const serviceFeeAmt = round2(afterDiscount.mul(order.serviceFeePct).div(100));
-  const total = round2(afterDiscount.add(serviceFeeAmt));
+  const deliveryFee = order.deliveryFee ?? Z();
+  const total = round2(afterDiscount.add(serviceFeeAmt).add(deliveryFee));
 
   return { subtotal: round2(subtotal), discountAmt, serviceFeeAmt, total };
 }

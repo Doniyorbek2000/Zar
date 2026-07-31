@@ -10,6 +10,10 @@ import { reportsRouter } from './modules/reports/reports.routes';
 import { usersRouter } from './modules/users/users.routes';
 import { customersRouter } from './modules/customers/customers.routes';
 import { receiptsRouter } from './modules/receipts/receipts.routes';
+import { settingsRouter } from './modules/settings/settings.routes';
+import { deliveryRouter } from './modules/delivery/delivery.routes';
+import { uploadsRouter } from './modules/uploads/uploads.routes';
+import { publicRouter } from './modules/public/public.routes';
 
 export const apiRouter = Router();
 
@@ -26,3 +30,7 @@ apiRouter.use('/reports', reportsRouter);
 apiRouter.use('/users', usersRouter);
 apiRouter.use('/customers', customersRouter);
 apiRouter.use('/receipts', receiptsRouter);
+apiRouter.use('/settings', settingsRouter);
+apiRouter.use('/delivery', deliveryRouter);
+apiRouter.use('/uploads', uploadsRouter);
+apiRouter.use('/public', publicRouter);

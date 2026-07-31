@@ -36,3 +36,6 @@ coverage/
 
 # Vite
 frontend/dist/
+
+# Yuklangan rasmlar
+backend/uploads/

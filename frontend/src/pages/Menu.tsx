@@ -3,11 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Category, Product } from '../api/types';
 import { money } from '../lib/format';
+import { ProductEditor } from '../components/ProductEditor';
 
 export function MenuPage() {
   const qc = useQueryClient();
   const [catId, setCatId] = useState<string | null>(null);
-  const [showProduct, setShowProduct] = useState(false);
+  const [editor, setEditor] = useState<{ productId: string | null } | null>(null);
 
   const { data: categories } = useQuery({
     queryKey: ['categories'],
@@ -30,10 +31,10 @@ export function MenuPage() {
     <div className="h-full overflow-auto">
       <header className="px-6 py-4 bg-white border-b flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold">Menyu boshqaruvi</h1>
-          <p className="text-sm text-slate-400">Kategoriyalar, taomlar va narxlar</p>
+          <h1 className="text-xl font-bold">🍽 Menyu boshqaruvi</h1>
+          <p className="text-sm text-slate-400">Taomlar, rasmlar, narxlar va texnologik kartalar</p>
         </div>
-        <button className="btn-primary" onClick={() => setShowProduct(true)}>
+        <button className="btn-primary" onClick={() => setEditor({ productId: null })}>
           + Taom qo'shish
         </button>
       </header>
@@ -50,7 +51,7 @@ export function MenuPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500 text-left text-xs uppercase">
               <tr>
-                <th className="px-4 py-3">Nomi</th>
+                <th className="px-4 py-3">Taom</th>
                 <th className="px-4 py-3">Kategoriya</th>
                 <th className="px-4 py-3">Turi</th>
                 <th className="px-4 py-3 text-right">Narx</th>
@@ -59,14 +60,25 @@ export function MenuPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {list.map((p) => (
-                <tr key={p.id} className={p.inStopList ? 'bg-red-50/40' : ''}>
-                  <td className="px-4 py-3 font-semibold">{p.name}</td>
+                <tr
+                  key={p.id}
+                  className={`cursor-pointer hover:bg-slate-50 ${p.inStopList ? 'bg-red-50/40' : ''}`}
+                  onClick={() => setEditor({ productId: p.id })}
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-lg bg-slate-100 overflow-hidden grid place-items-center text-lg shrink-0">
+                        {p.imageUrl ? <img src={p.imageUrl} alt="" className="w-full h-full object-cover" /> : '🍽'}
+                      </div>
+                      <span className="font-semibold">{p.name}</span>
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-slate-500">{p.category?.name}</td>
                   <td className="px-4 py-3 text-slate-500">
                     {p.type === 'DISH' ? 'Taom' : p.type === 'GOODS' ? 'Tovar' : 'Yarim tayyor'}
                   </td>
                   <td className="px-4 py-3 text-right font-bold">{money(p.price)}</td>
-                  <td className="px-4 py-3 text-center">
+                  <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => toggleStop.mutate({ id: p.id, inStopList: !p.inStopList })}
                       className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
@@ -83,7 +95,9 @@ export function MenuPage() {
         </div>
       </div>
 
-      {showProduct && <ProductModal categories={categories ?? []} onClose={() => setShowProduct(false)} />}
+      {editor && (
+        <ProductEditor productId={editor.productId} categories={categories ?? []} onClose={() => setEditor(null)} />
+      )}
     </div>
   );
 }
@@ -97,101 +111,5 @@ function CatChip({ active, onClick, label, color }: { active: boolean; onClick: 
     >
       {label}
     </button>
-  );
-}
-
-function ProductModal({ categories, onClose }: { categories: Category[]; onClose: () => void }) {
-  const qc = useQueryClient();
-  const [form, setForm] = useState({
-    name: '',
-    categoryId: categories[0]?.id ?? '',
-    price: '',
-    unit: 'porsiya',
-    type: 'DISH' as Product['type'],
-  });
-
-  const create = useMutation({
-    mutationFn: () =>
-      api.post('/catalog/products', {
-        name: form.name,
-        categoryId: form.categoryId,
-        price: Number(form.price),
-        unit: form.unit,
-        type: form.type,
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['products-admin'] });
-      qc.invalidateQueries({ queryKey: ['products'] });
-      onClose();
-    },
-  });
-
-  return (
-    <div className="fixed inset-0 bg-black/40 grid place-items-center z-50 p-4" onClick={onClose}>
-      <div className="card w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-xl font-bold mb-4">Yangi taom</h2>
-        <div className="space-y-3">
-          <div>
-            <label className="label">Nomi</label>
-            <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">Kategoriya</label>
-              <select
-                className="input"
-                value={form.categoryId}
-                onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-              >
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="label">Turi</label>
-              <select
-                className="input"
-                value={form.type}
-                onChange={(e) => setForm({ ...form, type: e.target.value as Product['type'] })}
-              >
-                <option value="DISH">Taom</option>
-                <option value="GOODS">Tovar</option>
-                <option value="PREPARATION">Yarim tayyor</option>
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">Narx (so'm)</label>
-              <input
-                type="number"
-                className="input"
-                value={form.price}
-                onChange={(e) => setForm({ ...form, price: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="label">Birlik</label>
-              <input className="input" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} />
-            </div>
-          </div>
-        </div>
-        <div className="flex gap-2 mt-5">
-          <button className="btn-ghost flex-1" onClick={onClose}>
-            Bekor qilish
-          </button>
-          <button
-            className="btn-primary flex-1"
-            disabled={!form.name || !form.price || create.isPending}
-            onClick={() => create.mutate()}
-          >
-            Saqlash
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }

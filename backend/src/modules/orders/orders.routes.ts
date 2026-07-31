@@ -30,16 +30,55 @@ ordersRouter.post(
   validate({
     body: z.object({
       type: z.enum(['DINE_IN', 'TAKEAWAY', 'DELIVERY']).optional(),
+      source: z.enum(['POS', 'PHONE', 'QR', 'WEB']).optional(),
       tableId: z.string().optional(),
       waiterId: z.string().optional(),
       guests: z.number().int().positive().optional(),
       customerId: z.string().optional(),
+      customerName: z.string().optional(),
+      customerPhone: z.string().optional(),
+      deliveryAddress: z.string().optional(),
+      deliveryFee: z.number().nonnegative().optional(),
+      note: z.string().optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
     const order = await ordersService.create(branchOf(req), req.user!.sub, req.body);
     ok(res, order, 201);
   }),
+);
+
+// Mijozni biriktirish (bo'shatish uchun customerId: null)
+ordersRouter.post(
+  '/:id/customer',
+  validate({ body: z.object({ customerId: z.string().nullable() }) }),
+  asyncHandler(async (req, res) => ok(res, await ordersService.setCustomer(req.params.id, req.body.customerId))),
+);
+
+// Dostavka ma'lumotlari
+ordersRouter.post(
+  '/:id/delivery',
+  validate({
+    body: z.object({
+      customerName: z.string().optional(),
+      customerPhone: z.string().optional(),
+      deliveryAddress: z.string().optional(),
+      deliveryFee: z.number().nonnegative().optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => ok(res, await ordersService.setDelivery(req.params.id, req.body))),
+);
+
+// Kuryer tayinlash / yetkazish holati
+ordersRouter.post(
+  '/:id/delivery-status',
+  validate({
+    body: z.object({
+      courierId: z.string().nullable().optional(),
+      deliveryStatus: z.enum(['PENDING', 'ASSIGNED', 'ON_WAY', 'DELIVERED']).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => ok(res, await ordersService.updateDelivery(req.params.id, req.body))),
 );
 
 ordersRouter.post(

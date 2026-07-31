@@ -33,15 +33,16 @@ function FloorView({ onOpenOrder }: { onOpenOrder: (id: string) => void }) {
 
   return (
     <div className="h-full flex flex-col">
-      <header className="px-6 py-4 bg-white border-b flex items-center justify-between">
-        <h1 className="text-xl font-bold">Zallar va stollar</h1>
-        <button
-          className="btn-primary"
-          title="Stolsiz (o'zi bilan olib ketish)"
-          onClick={() => createOrder.mutate({ type: 'TAKEAWAY' })}
-        >
-          + Olib ketish
-        </button>
+      <header className="px-4 sm:px-6 py-4 bg-white border-b flex items-center justify-between gap-2">
+        <h1 className="text-lg sm:text-xl font-bold">Zallar va stollar</h1>
+        <div className="flex gap-2">
+          <button className="btn-ghost text-sm" onClick={() => createOrder.mutate({ type: 'TAKEAWAY' })}>
+            🥡 Olib ketish
+          </button>
+          <button className="btn-primary text-sm" onClick={() => createOrder.mutate({ type: 'DELIVERY' })}>
+            🛵 Dostavka
+          </button>
+        </div>
       </header>
 
       <div className="px-6 pt-4 flex gap-2 flex-wrap">
@@ -94,6 +95,7 @@ function OrderView({ orderId, onBack }: { orderId: string; onBack: () => void })
   const [catId, setCatId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [showPay, setShowPay] = useState(false);
+  const [showCustomer, setShowCustomer] = useState(false);
   const [receipt, setReceipt] = useState<null | { kind: 'precheck' | 'fiscal'; auto: boolean }>(null);
 
   const { data: order } = useQuery({
@@ -142,6 +144,17 @@ function OrderView({ orderId, onBack }: { orderId: string; onBack: () => void })
       invalidate();
       onBack();
     },
+  });
+  const setCustomer = useMutation({
+    mutationFn: (customerId: string | null) => api.post(`/orders/${orderId}/customer`, { customerId }),
+    onSuccess: () => {
+      invalidate();
+      setShowCustomer(false);
+    },
+  });
+  const setDelivery = useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.post(`/orders/${orderId}/delivery`, body),
+    onSuccess: invalidate,
   });
 
   const filtered = useMemo(() => {
@@ -220,12 +233,19 @@ function OrderView({ orderId, onBack }: { orderId: string; onBack: () => void })
       </div>
 
       {/* Hisob (chek) */}
-      <div className="w-96 flex flex-col bg-white">
+      <div className="w-full sm:w-96 flex flex-col bg-white">
         <div className="px-5 py-4 border-b">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-xs text-slate-400">Buyurtma #{order.number}</div>
-              <div className="font-bold text-lg">{order.table?.name ?? 'Olib ketish'}</div>
+              <div className="text-xs text-slate-400">
+                Buyurtma #{order.number}
+                {order.type === 'DELIVERY' && ' · 🛵 Dostavka'}
+                {order.type === 'TAKEAWAY' && ' · 🥡 Olib ketish'}
+                {order.source === 'QR' && ' · 📱 QR'}
+              </div>
+              <div className="font-bold text-lg">
+                {order.table?.name ?? (order.type === 'DELIVERY' ? 'Yetkazib berish' : 'Olib ketish')}
+              </div>
             </div>
             <span
               className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
@@ -239,6 +259,28 @@ function OrderView({ orderId, onBack }: { orderId: string; onBack: () => void })
               {order.status}
             </span>
           </div>
+
+          {/* Mijoz (loyalty) */}
+          <div className="mt-3">
+            {order.customer ? (
+              <div className="flex items-center justify-between rounded-lg bg-brand-50 border border-brand-200 px-3 py-2">
+                <div className="text-sm">
+                  <span className="font-semibold">💳 {order.customer.fullName}</span>
+                  <span className="text-xs text-slate-500 ml-2">Bonus: {money(order.customer.bonusBalance)}</span>
+                </div>
+                <button className="text-xs text-red-500" onClick={() => setCustomer.mutate(null)}>
+                  olib tashlash
+                </button>
+              </div>
+            ) : (
+              <button className="btn-ghost w-full text-sm" onClick={() => setShowCustomer(true)}>
+                + Mijoz biriktirish (bonus)
+              </button>
+            )}
+          </div>
+
+          {/* Dostavka ma'lumotlari */}
+          {order.type === 'DELIVERY' && <DeliveryForm order={order} onSave={(b) => setDelivery.mutate(b)} />}
         </div>
 
         <div className="flex-1 overflow-auto p-4 space-y-2">
@@ -290,6 +332,7 @@ function OrderView({ orderId, onBack }: { orderId: string; onBack: () => void })
           {Number(order.discountAmt) > 0 && (
             <Row label={`Chegirma (${num(order.discountPct)}%)`} value={'−' + money(order.discountAmt)} red />
           )}
+          {Number(order.deliveryFee) > 0 && <Row label="Yetkazish narxi" value={money(order.deliveryFee)} />}
           <div className="flex justify-between items-center pt-2 border-t mt-2">
             <span className="font-bold text-base">Jami</span>
             <span className="font-extrabold text-xl text-brand-700">{money(order.total)}</span>
@@ -363,6 +406,77 @@ function OrderView({ orderId, onBack }: { orderId: string; onBack: () => void })
           }}
         />
       )}
+
+      {showCustomer && (
+        <CustomerPicker onClose={() => setShowCustomer(false)} onPick={(id) => setCustomer.mutate(id)} />
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Dostavka formasi ---------------- */
+function DeliveryForm({ order, onSave }: { order: Order; onSave: (b: Record<string, unknown>) => void }) {
+  const [f, setF] = useState({
+    customerName: order.customerName ?? '',
+    customerPhone: order.customerPhone ?? '',
+    deliveryAddress: order.deliveryAddress ?? '',
+    deliveryFee: order.deliveryFee,
+  });
+  const save = () =>
+    onSave({
+      customerName: f.customerName,
+      customerPhone: f.customerPhone,
+      deliveryAddress: f.deliveryAddress,
+      deliveryFee: Number(f.deliveryFee),
+    });
+  return (
+    <div className="mt-3 space-y-2 rounded-lg bg-slate-50 p-3">
+      <div className="text-xs font-semibold text-slate-500">🛵 Yetkazib berish</div>
+      <input className="input text-sm" placeholder="Mijoz ismi" value={f.customerName} onChange={(e) => setF({ ...f, customerName: e.target.value })} onBlur={save} />
+      <input className="input text-sm" placeholder="Telefon" value={f.customerPhone} onChange={(e) => setF({ ...f, customerPhone: e.target.value })} onBlur={save} />
+      <input className="input text-sm" placeholder="Manzil" value={f.deliveryAddress} onChange={(e) => setF({ ...f, deliveryAddress: e.target.value })} onBlur={save} />
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-slate-500 whitespace-nowrap">Yetkazish narxi:</span>
+        <input type="number" className="input text-sm" value={f.deliveryFee} onChange={(e) => setF({ ...f, deliveryFee: e.target.value })} onBlur={save} />
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Mijoz tanlash modali ---------------- */
+function CustomerPicker({ onClose, onPick }: { onClose: () => void; onPick: (id: string) => void }) {
+  const [search, setSearch] = useState('');
+  const { data: customers } = useQuery({
+    queryKey: ['customers', search],
+    queryFn: () => api.get<import('../api/types').Customer[]>(`/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  });
+  return (
+    <div className="fixed inset-0 bg-black/40 grid place-items-center z-50 p-4" onClick={onClose}>
+      <div className="card w-full max-w-md p-5 max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-lg font-bold mb-3">Mijozni tanlash</h2>
+        <input className="input mb-3" placeholder="Ism yoki telefon..." value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />
+        <div className="flex-1 overflow-auto space-y-1">
+          {customers?.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => onPick(c.id)}
+              className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-slate-50 border border-slate-100"
+            >
+              <div className="flex justify-between">
+                <span className="font-semibold">{c.fullName}</span>
+                <span className="text-sm text-brand-700 font-bold">{money(c.bonusBalance)}</span>
+              </div>
+              <div className="text-xs text-slate-400">
+                {c.phone || 'telefon yo\'q'} {Number(c.discountPct) > 0 && `· ${Number(c.discountPct)}% chegirma`}
+              </div>
+            </button>
+          ))}
+          {!customers?.length && <div className="text-sm text-slate-400 text-center py-6">Mijoz topilmadi</div>}
+        </div>
+        <button className="btn-ghost w-full mt-3" onClick={onClose}>
+          Yopish
+        </button>
+      </div>
     </div>
   );
 }

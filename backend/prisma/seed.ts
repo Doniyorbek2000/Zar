@@ -13,6 +13,8 @@ async function main() {
     prisma.orderItem.deleteMany(),
     prisma.payment.deleteMany(),
     prisma.order.deleteMany(),
+    prisma.bonusTransaction.deleteMany(),
+    prisma.setting.deleteMany(),
     prisma.stockMovement.deleteMany(),
     prisma.supplyItem.deleteMany(),
     prisma.supply.deleteMany(),
@@ -84,6 +86,25 @@ async function main() {
         pinHash: await hash('2222'),
         role: 'COOK',
       },
+      {
+        branchId: branch.id,
+        fullName: 'Kuryer Bekzod',
+        username: 'kuryer',
+        passwordHash: await hash('kuryer123'),
+        pinHash: await hash('3333'),
+        role: 'COURIER',
+        phone: '+998 93 555 44 33',
+      },
+    ],
+  });
+
+  // Loyalty / dostavka sozlamalari
+  await prisma.setting.createMany({
+    data: [
+      { key: 'loyalty.earnPct', value: '5' },
+      { key: 'loyalty.redeemEnabled', value: 'true' },
+      { key: 'loyalty.minRedeem', value: '1000' },
+      { key: 'delivery.defaultFee', value: '15000' },
     ],
   });
 

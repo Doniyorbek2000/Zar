@@ -9,7 +9,8 @@ export type RealtimeEvent =
   | 'tables:changed' // stollar/zallar holati o'zgardi
   | 'order:changed' // aniq buyurtma o'zgardi (payload: { orderId })
   | 'kds:changed' // oshxona navbati o'zgardi
-  | 'stock:changed'; // ombor qoldig'i o'zgardi
+  | 'stock:changed' // ombor qoldig'i o'zgardi
+  | 'delivery:changed'; // dostavka buyurtmalari o'zgardi
 
 let io: Server | null = null;
 
