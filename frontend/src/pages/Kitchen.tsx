@@ -24,7 +24,7 @@ export function KitchenPage() {
   const { data: queue } = useQuery({
     queryKey: ['kds'],
     queryFn: () => api.get<KdsOrder[]>('/kitchen/queue'),
-    refetchInterval: 4000,
+    refetchInterval: 15000, // real-time zaxirasi (asosiy yangilanish WebSocket orqali)
   });
 
   const setStatus = useMutation({

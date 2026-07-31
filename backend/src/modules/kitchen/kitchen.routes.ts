@@ -5,6 +5,7 @@ import { validate } from '../../middleware/validate';
 import { authenticate, authorize } from '../../middleware/auth';
 import { BadRequest } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
+import { realtime } from '../../realtime/realtime';
 
 // Kitchen Display System (KDS) — oshxona ekrani
 export const kitchenRouter = Router();
@@ -66,6 +67,15 @@ kitchenRouter.post(
         data: { status: 'READY' },
       });
     }
+
+    // Real-time: oshxona ekrani, stollar va buyurtma jonli yangilanadi
+    const order = await prisma.order.findUnique({
+      where: { id: item.orderId },
+      select: { branchId: true },
+    });
+    realtime.emitToBranch(order?.branchId, 'kds:changed');
+    realtime.emitToBranch(order?.branchId, 'order:changed', { orderId: item.orderId });
+    realtime.emitToBranch(order?.branchId, 'tables:changed');
     ok(res, item);
   }),
 );

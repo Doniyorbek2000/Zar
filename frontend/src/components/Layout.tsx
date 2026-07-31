@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { canManage, useAuth } from '../store/auth';
 import { roleName } from '../lib/format';
+import { useRealtime } from '../realtime/useRealtime';
 
 interface NavItem {
   to: string;
@@ -22,6 +23,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const manage = canManage(user?.role);
+  const { connected } = useRealtime();
 
   return (
     <div className="flex h-full">
@@ -33,6 +35,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <div>
             <div className="text-white font-bold leading-tight">ZarPOS</div>
             <div className="text-[11px] text-slate-500">Restoran tizimi</div>
+          </div>
+        </div>
+
+        <div className="px-5 py-2 border-b border-slate-800">
+          <div className="flex items-center gap-2 text-[11px] font-medium">
+            <span
+              className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400 animate-pulse' : 'bg-slate-600'}`}
+            />
+            <span className={connected ? 'text-green-400' : 'text-slate-500'}>
+              {connected ? 'Jonli ulanish faol' : 'Ulanmoqda...'}
+            </span>
           </div>
         </div>
 

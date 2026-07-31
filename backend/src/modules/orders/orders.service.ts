@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma';
 import { BadRequest, Conflict, NotFound } from '../../lib/errors';
 import { D } from '../../lib/money';
 import { computeTotals } from './orders.totals';
+import { realtime } from '../../realtime/realtime';
 
 const ORDER_INCLUDE = {
   items: { include: { modifiers: true, product: { select: { id: true, name: true, type: true } } } },
@@ -54,7 +55,7 @@ export const ordersService = {
     userId: string,
     data: { type?: OrderType; tableId?: string; waiterId?: string; guests?: number; customerId?: string },
   ) {
-    return prisma.$transaction(async (tx) => {
+    const order = await prisma.$transaction(async (tx) => {
       if (data.tableId) {
         const busy = await tx.order.findFirst({
           where: { tableId: data.tableId, status: { in: ['OPEN', 'SENT', 'READY'] } },
@@ -69,7 +70,7 @@ export const ordersService = {
       });
       const number = (last?.number ?? 0) + 1;
 
-      const order = await tx.order.create({
+      const created = await tx.order.create({
         data: {
           branchId,
           number,
@@ -86,8 +87,12 @@ export const ordersService = {
       if (data.tableId) {
         await tx.table.update({ where: { id: data.tableId }, data: { status: 'OCCUPIED' } });
       }
-      return order;
+      return created;
     });
+
+    realtime.emitToBranch(branchId, 'tables:changed');
+    realtime.emitToBranch(branchId, 'order:changed', { orderId: order.id });
+    return order;
   },
 
   // Buyurtmaga taom qo'shish (narx va tannarx "surat" sifatida saqlanadi)
@@ -95,7 +100,7 @@ export const ordersService = {
     orderId: string,
     data: { productId: string; quantity?: number; modifierIds?: string[]; note?: string },
   ) {
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
       if (order.status === 'PAID' || order.status === 'CANCELLED') {
         throw Conflict('Yopilgan buyurtmani o\'zgartirib bo\'lmaydi');
@@ -136,10 +141,13 @@ export const ordersService = {
 
       return recalc(tx, orderId);
     });
+
+    realtime.emitToBranch(result.branchId, 'order:changed', { orderId });
+    return result;
   },
 
   async updateItem(orderId: string, itemId: string, data: { quantity?: number; note?: string }) {
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const item = await tx.orderItem.findUnique({ where: { id: itemId } });
       if (!item || item.orderId !== orderId) throw NotFound('Buyurtma qatori topilmadi');
       await tx.orderItem.update({
@@ -151,10 +159,13 @@ export const ordersService = {
       });
       return recalc(tx, orderId);
     });
+
+    realtime.emitToBranch(result.branchId, 'order:changed', { orderId });
+    return result;
   },
 
   async removeItem(orderId: string, itemId: string) {
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const item = await tx.orderItem.findUnique({ where: { id: itemId } });
       if (!item || item.orderId !== orderId) throw NotFound('Buyurtma qatori topilmadi');
       // Oshxonaga yuborilgan taomni o'chirmaymiz, bekor qilamiz (audit uchun)
@@ -165,29 +176,42 @@ export const ordersService = {
       }
       return recalc(tx, orderId);
     });
+
+    realtime.emitToBranch(result.branchId, 'order:changed', { orderId });
+    realtime.emitToBranch(result.branchId, 'kds:changed');
+    return result;
   },
 
   async setDiscount(orderId: string, discountPct: number) {
     if (discountPct < 0 || discountPct > 100) throw BadRequest('Chegirma 0-100% oralig\'ida bo\'lishi kerak');
     await prisma.order.update({ where: { id: orderId }, data: { discountPct: D(discountPct) } });
-    return prisma.$transaction((tx) => recalc(tx, orderId));
+    const result = await prisma.$transaction((tx) => recalc(tx, orderId));
+    realtime.emitToBranch(result.branchId, 'order:changed', { orderId });
+    return result;
   },
 
   async setServiceFee(orderId: string, serviceFeePct: number) {
     if (serviceFeePct < 0 || serviceFeePct > 100) throw BadRequest('Xizmat haqi 0-100% oralig\'ida bo\'lishi kerak');
     await prisma.order.update({ where: { id: orderId }, data: { serviceFeePct: D(serviceFeePct) } });
-    return prisma.$transaction((tx) => recalc(tx, orderId));
+    const result = await prisma.$transaction((tx) => recalc(tx, orderId));
+    realtime.emitToBranch(result.branchId, 'order:changed', { orderId });
+    return result;
   },
 
   // Oshxonaga yuborish (KDS)
   async sendToKitchen(orderId: string) {
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
       if (order.status === 'PAID' || order.status === 'CANCELLED') throw Conflict('Buyurtma yopilgan');
       await tx.orderItem.updateMany({ where: { orderId, status: 'NEW' }, data: { status: 'SENT' } });
       await tx.order.update({ where: { id: orderId }, data: { status: 'SENT' } });
       return recalc(tx, orderId);
     });
+
+    realtime.emitToBranch(result.branchId, 'order:changed', { orderId });
+    realtime.emitToBranch(result.branchId, 'kds:changed');
+    realtime.emitToBranch(result.branchId, 'tables:changed');
+    return result;
   },
 
   // To'lov qabul qilish; to'liq to'langanda ombordan hisobdan chiqaradi va yopadi
@@ -196,7 +220,7 @@ export const ordersService = {
     userId: string,
     payments: { method: PaymentMethod; amount: number }[],
   ) {
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUniqueOrThrow({
         where: { id: orderId },
         include: { items: { include: { modifiers: true } }, payments: true },
@@ -269,13 +293,20 @@ export const ordersService = {
       const change = totalPaid.sub(totals.total);
       return { order: updated, change: change.toFixed(2) };
     });
+
+    const branchId = result.order.branchId;
+    realtime.emitToBranch(branchId, 'tables:changed');
+    realtime.emitToBranch(branchId, 'order:changed', { orderId });
+    realtime.emitToBranch(branchId, 'kds:changed');
+    realtime.emitToBranch(branchId, 'stock:changed');
+    return result;
   },
 
   async cancel(orderId: string, reason?: string) {
-    return prisma.$transaction(async (tx) => {
+    const updated = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
       if (order.status === 'PAID') throw Conflict('To\'langan buyurtmani bekor qilib bo\'lmaydi');
-      const updated = await tx.order.update({
+      const res = await tx.order.update({
         where: { id: orderId },
         data: { status: 'CANCELLED', closedAt: new Date(), note: reason ?? order.note },
         include: ORDER_INCLUDE,
@@ -283,13 +314,18 @@ export const ordersService = {
       if (order.tableId) {
         await tx.table.update({ where: { id: order.tableId }, data: { status: 'FREE' } });
       }
-      return updated;
+      return res;
     });
+
+    realtime.emitToBranch(updated.branchId, 'tables:changed');
+    realtime.emitToBranch(updated.branchId, 'order:changed', { orderId });
+    realtime.emitToBranch(updated.branchId, 'kds:changed');
+    return updated;
   },
 
   // Stolni ko'chirish
   async moveTable(orderId: string, tableId: string) {
-    return prisma.$transaction(async (tx) => {
+    const updated = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
       const busy = await tx.order.findFirst({
         where: { tableId, status: { in: ['OPEN', 'SENT', 'READY'] }, id: { not: orderId } },
@@ -299,5 +335,9 @@ export const ordersService = {
       await tx.table.update({ where: { id: tableId }, data: { status: 'OCCUPIED' } });
       return tx.order.update({ where: { id: orderId }, data: { tableId }, include: ORDER_INCLUDE });
     });
+
+    realtime.emitToBranch(updated.branchId, 'tables:changed');
+    realtime.emitToBranch(updated.branchId, 'order:changed', { orderId });
+    return updated;
   },
 };

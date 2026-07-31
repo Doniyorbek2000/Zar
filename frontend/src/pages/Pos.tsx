@@ -97,7 +97,7 @@ function OrderView({ orderId, onBack }: { orderId: string; onBack: () => void })
   const { data: order } = useQuery({
     queryKey: ['order', orderId],
     queryFn: () => api.get<Order>(`/orders/${orderId}`),
-    refetchInterval: 5000,
+    refetchInterval: 15000, // real-time zaxirasi (asosiy yangilanish WebSocket orqali)
   });
   const { data: categories } = useQuery({
     queryKey: ['categories'],

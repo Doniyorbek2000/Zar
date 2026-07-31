@@ -2,6 +2,7 @@ import { Prisma, StockUnit } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { BadRequest, NotFound } from '../../lib/errors';
 import { D } from '../../lib/money';
+import { realtime } from '../../realtime/realtime';
 
 export const inventoryService = {
   // ---------- Ingredientlar ----------
@@ -71,7 +72,7 @@ export const inventoryService = {
   ) {
     if (!data.items.length) throw BadRequest('Kamida bitta pozitsiya kerak');
 
-    return prisma.$transaction(async (tx) => {
+    const supply = await prisma.$transaction(async (tx) => {
       const total = data.items.reduce((s, i) => s.add(D(i.quantity).mul(D(i.unitPrice))), new Prisma.Decimal(0));
 
       const supply = await tx.supply.create({
@@ -133,6 +134,9 @@ export const inventoryService = {
 
       return supply;
     });
+
+    realtime.emitToBranch(branchId, 'stock:changed');
+    return supply;
   },
 
   // ---------- Spisaniye (write-off) ----------
@@ -141,7 +145,7 @@ export const inventoryService = {
     userId: string,
     data: { ingredientId: string; quantity: number; reason: string },
   ) {
-    return prisma.$transaction(async (tx) => {
+    const movement = await prisma.$transaction(async (tx) => {
       const ingredient = await tx.ingredient.findUnique({ where: { id: data.ingredientId } });
       if (!ingredient) throw NotFound('Ingredient topilmadi');
       const qty = D(data.quantity);
@@ -163,6 +167,9 @@ export const inventoryService = {
         },
       });
     });
+
+    realtime.emitToBranch(branchId, 'stock:changed');
+    return movement;
   },
 
   // ---------- Inventarizatsiya ----------
@@ -172,8 +179,8 @@ export const inventoryService = {
     userId: string,
     items: { ingredientId: string; actualQuantity: number }[],
   ) {
-    return prisma.$transaction(async (tx) => {
-      const results = [];
+    const results = await prisma.$transaction(async (tx) => {
+      const adjustments = [];
       for (const item of items) {
         const stock = await tx.stock.findUnique({
           where: { branchId_ingredientId: { branchId, ingredientId: item.ingredientId } },
@@ -199,10 +206,13 @@ export const inventoryService = {
             },
           });
         }
-        results.push({ ingredientId: item.ingredientId, diff: diff.toFixed(3) });
+        adjustments.push({ ingredientId: item.ingredientId, diff: diff.toFixed(3) });
       }
-      return results;
+      return adjustments;
     });
+
+    realtime.emitToBranch(branchId, 'stock:changed');
+    return results;
   },
 
   movements(branchId: string, ingredientId?: string) {
