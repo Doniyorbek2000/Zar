@@ -131,3 +131,39 @@ export interface Shift {
   openedAt: string;
   user?: { id: string; fullName: string };
 }
+
+export interface ReceiptDto {
+  kind: 'PRECHECK' | 'FISCAL';
+  title: string;
+  currency: string;
+  company: { name: string };
+  branch: { name: string; address?: string | null; phone?: string | null };
+  order: {
+    number: number;
+    typeLabel: string;
+    table?: string | null;
+    waiter?: string | null;
+    guests: number;
+    openedAt: string;
+    closedAt?: string | null;
+  };
+  items: {
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    total: number;
+    modifiers: { name: string; price: number }[];
+  }[];
+  subtotal: number;
+  discountPct: number;
+  discountAmt: number;
+  serviceFeePct: number;
+  serviceFeeAmt: number;
+  total: number;
+  payments: { methodLabel: string; amount: number }[];
+  paid: number;
+  change: number;
+  cashier?: string | null;
+  printedAt: string;
+  footer: string;
+}

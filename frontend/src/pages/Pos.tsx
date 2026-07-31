@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import type { Category, Hall, Order, Product } from '../api/types';
 import { money, num } from '../lib/format';
 import { PayModal } from '../components/PayModal';
+import { ReceiptModal } from '../components/ReceiptModal';
 
 export function PosPage() {
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
@@ -93,6 +94,7 @@ function OrderView({ orderId, onBack }: { orderId: string; onBack: () => void })
   const [catId, setCatId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [showPay, setShowPay] = useState(false);
+  const [receipt, setReceipt] = useState<null | { kind: 'precheck' | 'fiscal'; auto: boolean }>(null);
 
   const { data: order } = useQuery({
     queryKey: ['order', orderId],
@@ -307,6 +309,13 @@ function OrderView({ orderId, onBack }: { orderId: string; onBack: () => void })
             ))}
           </div>
 
+          <button
+            className="btn-ghost w-full mt-2"
+            disabled={activeItems.length === 0}
+            onClick={() => setReceipt({ kind: 'precheck', auto: false })}
+          >
+            🧾 Hisob (chek)
+          </button>
           <div className="grid grid-cols-2 gap-2 pt-2">
             <button
               className="btn-ghost"
@@ -336,7 +345,21 @@ function OrderView({ orderId, onBack }: { orderId: string; onBack: () => void })
           onPaid={() => {
             setShowPay(false);
             invalidate();
-            onBack();
+            // To'lovdan keyin fiskal chek avtomatik chop etiladi
+            setReceipt({ kind: 'fiscal', auto: true });
+          }}
+        />
+      )}
+
+      {receipt && (
+        <ReceiptModal
+          orderId={orderId}
+          kind={receipt.kind}
+          autoPrint={receipt.auto}
+          onClose={() => {
+            const wasFiscal = receipt.kind === 'fiscal';
+            setReceipt(null);
+            if (wasFiscal) onBack(); // to'lov yakunlandi — stollarga qaytamiz
           }}
         />
       )}

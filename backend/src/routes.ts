@@ -9,6 +9,7 @@ import { kitchenRouter } from './modules/kitchen/kitchen.routes';
 import { reportsRouter } from './modules/reports/reports.routes';
 import { usersRouter } from './modules/users/users.routes';
 import { customersRouter } from './modules/customers/customers.routes';
+import { receiptsRouter } from './modules/receipts/receipts.routes';
 
 export const apiRouter = Router();
 
@@ -24,3 +25,4 @@ apiRouter.use('/kitchen', kitchenRouter);
 apiRouter.use('/reports', reportsRouter);
 apiRouter.use('/users', usersRouter);
 apiRouter.use('/customers', customersRouter);
+apiRouter.use('/receipts', receiptsRouter);
